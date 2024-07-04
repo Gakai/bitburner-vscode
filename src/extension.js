@@ -56,26 +56,22 @@ function activate(context) {
   });
 
   disposableCommands.push(
-    vscode.commands.registerCommand(`ext.bitburner-connector.addAuthToken`, () => {
-      vscode.window
-        .showInputBox({
-          ignoreFocusOut: true,
-          password: true,
-          placeHolder: `Bitburner Auth Token`,
-          title: `Bitburner Auth Token:`,
-          prompt: `Please enter the Bitburner Auth Token, for more information, see 'README #authentication'.`,
-        })
-        .then((authToken) => {
-          secrets
-            .store(`authToken`, authToken.replace(/^bearer/i, ``).trim())
-            .then(() => {
-              showToast(`Bitburner Auth Token Added!`);
-            })
-            .then(undefined, (err) => {
-              console.error(`Storing of token failed: `, err);
-              showToast(`Failed to add Bitburner Auth Token!`, `error`);
-            });
-        });
+    vscode.commands.registerCommand(`ext.bitburner-connector.addAuthToken`, async () => {
+      const authToken = await vscode.window.showInputBox({
+        ignoreFocusOut: true,
+        password: true,
+        placeHolder: `Bitburner Auth Token`,
+        title: `Bitburner Auth Token:`,
+        prompt: `Please enter the Bitburner Auth Token, for more information, see 'README #authentication'.`,
+      });
+
+      try {
+        await secrets.store(`authToken`, authToken.replace(/^bearer/i, ``).trim());
+        showToast(`Bitburner Auth Token Added!`);
+      } catch (err) {
+        console.error(`Storing of token failed: `, err);
+        showToast(`Failed to add Bitburner Auth Token!`, `error`);
+      }
     }),
   );
 
@@ -102,66 +98,66 @@ function activate(context) {
   );
 
   disposableCommands.push(
-    vscode.commands.registerCommand(`ext.bitburner-connector.pushFile`, () => {
-      vscode.window.activeTextEditor.document.save().then(() => {
-        if (!isAuthTokenSet()) {
-          showAuthError();
-          return;
-        }
+    vscode.commands.registerCommand(`ext.bitburner-connector.pushFile`, async () => {
+      await vscode.window.activeTextEditor.document.save();
 
-        const currentOpenFileURI = getCurrentOpenDocURI();
+      if (!isAuthTokenSet()) {
+        showAuthError();
+        return;
+      }
 
-        if (!isValidGameFile(currentOpenFileURI)) {
-          showToast(
-            `Can only push a file that is one of the following file types: ${BB_GAME_CONFIG.validFileExtensions.join(
-              `, `,
-            )}`,
-            `error`,
-          );
-          return;
-        }
+      const currentOpenFileURI = getCurrentOpenDocURI();
 
-        const contents = fs.readFileSync(currentOpenFileURI).toString();
-        const filename = stripWorkspaceFolderFromFileName(currentOpenFileURI);
+      if (!isValidGameFile(currentOpenFileURI)) {
+        showToast(
+          `Can only push a file that is one of the following file types: ${BB_GAME_CONFIG.validFileExtensions.join(
+            `, `,
+          )}`,
+          `error`,
+        );
+        return;
+      }
 
-        doPostRequestToBBGame({
-          action: `UPSERT`,
-          filename: filename,
-          code: contents,
-        });
+      const contents = fs.readFileSync(currentOpenFileURI).toString();
+      const filename = stripWorkspaceFolderFromFileName(currentOpenFileURI);
+
+      doPostRequestToBBGame({
+        action: `UPSERT`,
+        filename: filename,
+        code: contents,
       });
     }),
   );
 
   disposableCommands.push(
-    vscode.commands.registerCommand(`ext.bitburner-connector.pushAllFiles`, () => {
-      vscode.workspace.saveAll(false).then(() => {
-        if (!isAuthTokenSet()) {
-          showAuthError();
-          return;
-        }
+    vscode.commands.registerCommand(`ext.bitburner-connector.pushAllFiles`, async () => {
+      await vscode.workspace.saveAll(false);
 
-        const filesURIs = vscode.workspace.workspaceFolders
-          .flatMap((wsf) => getFilesRecursively(`${wsf.uri.fsPath.toString()}/${sanitizedUserConfig.scriptRoot}`))
-          .filter(isValidGameFile);
+      if (!isAuthTokenSet()) {
+        showAuthError();
+        return;
+      }
 
-        const fileToContentMap = filesURIs.reduce((fileMap, fileURI) => {
-          const contents = fs.readFileSync(fileURI).toString();
-          const filename = stripWorkspaceFolderFromFileName(fileURI.toString());
-          fileMap.set(filename, contents);
-          return fileMap;
-        }, new Map());
+      const filesURIs = vscode.workspace.workspaceFolders
+        .flatMap((wsf) => getFilesRecursively(`${wsf.uri.fsPath.toString()}/${sanitizedUserConfig.scriptRoot}`))
+        .filter(isValidGameFile);
 
-        // TODO: Handle 'success toast' better for 'batch' upload
-        // Currently, if notifications are enabled, does a toast per file within doPostRequestToBBGame
-        for (const [filename, contents] of fileToContentMap.entries()) {
-          doPostRequestToBBGame({
-            action: `UPSERT`,
-            filename: filename,
-            code: contents,
-          });
-        }
-      });
+      const fileToContentMap = filesURIs.reduce((fileMap, fileURI) => {
+        const contents = fs.readFileSync(fileURI).toString();
+        const filename = stripWorkspaceFolderFromFileName(fileURI.toString());
+        fileMap.set(filename, contents);
+        return fileMap;
+      }, new Map());
+
+      // TODO: Handle 'success toast' better for 'batch' upload
+      // Currently, if notifications are enabled, does a toast per file within doPostRequestToBBGame
+      for (const [filename, contents] of fileToContentMap.entries()) {
+        doPostRequestToBBGame({
+          action: `UPSERT`,
+          filename: filename,
+          code: contents,
+        });
+      }
     }),
   );
 
@@ -372,6 +368,10 @@ const showToast = (message, toastType = `information`, opts = { forceShow: false
   ToastTypes[toastType](message);
 };
 
+/**
+ * @function
+ * @param {string} fileURI
+ */
 const isValidGameFile = (fileURI) => BB_GAME_CONFIG.validFileExtensions.some((ext) => fileURI.endsWith(ext));
 
 const isAuthTokenSet = async () => Boolean(await secrets.get(`authToken`));
