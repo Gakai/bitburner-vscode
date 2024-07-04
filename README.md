@@ -41,9 +41,6 @@ You can also activate the Autostart via "Enable Autostart" in the 'API Server' c
 
 #### Adding the token to the extension:
 
-The token will ultimately end up in the workspace configuration (See your workspaces`./.vscode/settings.json`), so you can either:
-
-- Add the token manually to the workspace `settings.json` to the key of `bitburner.authToken`.
 - Use the command palette (CTRL/CMD + SHIFT + P) and select `Bitburner: Add Auth Token`.
   - Paste the Auth Token copied via the games context menu in to the input box.
 

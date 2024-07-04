@@ -20,9 +20,14 @@ const BB_GAME_CONFIG = {
 let fsWatcher;
 let fwEnabled;
 
+/**
+ * @type {vscode.SecretStorage}
+ */
+let secrets;
+
 // TODO: Refactor this user config to combined 'extension/user config' with better internal API/structure
 /**
- * @type {{ scriptRoot: string, fwEnabled: boolean, showPushSuccessNotification: boolean, showFileWatcherEnabledNotification: boolean, authToken: string, hostname: string, port: number }}
+ * @type {{ scriptRoot: string, fwEnabled: boolean, showPushSuccessNotification: boolean, showFileWatcherEnabledNotification: boolean, hostname: string, port: number }}
  */
 let sanitizedUserConfig;
 
@@ -30,6 +35,7 @@ let sanitizedUserConfig;
  * @param {vscode.ExtensionContext} context
  */
 function activate(context) {
+  secrets = context.secrets;
   /**
    * @type Array<vscode.Disposable>
    */
@@ -60,11 +66,14 @@ function activate(context) {
           prompt: `Please enter the Bitburner Auth Token, for more information, see 'README #authentication'.`,
         })
         .then((authToken) => {
-          vscode.workspace
-            .getConfiguration(`bitburner`)
-            .update(`authToken`, authToken)
+          secrets
+            .store(`authToken`, authToken.replace(/^bearer/i, ``).trim())
             .then(() => {
               showToast(`Bitburner Auth Token Added!`);
+            })
+            .then(undefined, (err) => {
+              console.error(`Storing of token failed: `, err);
+              showToast(`Failed to add Bitburner Auth Token!`, `error`);
             });
         });
     }),
@@ -257,7 +266,7 @@ const getCurrentOpenDocURI = () => vscode.window.activeTextEditor.document.uri.f
  * Make a POST request to the expected port of the game
  * @param {{ action: `CREATE` | `UPDATE` | `UPSERT` | `DELETE`, filename: string, code?: string }} payload The payload to send to the game client
  */
-const doPostRequestToBBGame = (payload) => {
+const doPostRequestToBBGame = async (payload) => {
   // If the file is going to be in a director, it NEEDS the leading `/`, i.e. `/my-dir/file.js`
   // If the file is standalone, it CAN NOT HAVE a leading slash, i.e. `file.js`
   // The game will not accept the file and/or have undefined behaviour otherwise...
@@ -269,6 +278,7 @@ const doPostRequestToBBGame = (payload) => {
     cleanPayload.filename = `/${cleanPayload.filename}`;
   }
 
+  const token = await secrets.get(`authToken`);
   const stringPayload = JSON.stringify(cleanPayload);
   const options = {
     hostname: sanitizedUserConfig.hostname,
@@ -278,7 +288,7 @@ const doPostRequestToBBGame = (payload) => {
     headers: {
       "Content-Type": `application/json`,
       "Content-Length": stringPayload.length,
-      Authorization: `Bearer ${sanitizedUserConfig.authToken}`,
+      Authorization: `Bearer ${token}`,
     },
   };
 
@@ -305,7 +315,7 @@ const doPostRequestToBBGame = (payload) => {
 };
 
 // TODO: Overhaul internal user/extension config 'API'
-const sanitizeUserConfig = () => {
+const sanitizeUserConfig = async () => {
   const userConfig = vscode.workspace.getConfiguration(`bitburner`);
   const fwInspect = vscode.workspace.getConfiguration(`bitburner`).inspect(`fileWatcher.enable`);
 
@@ -313,7 +323,7 @@ const sanitizeUserConfig = () => {
   const fwVal = fwInspect.workspaceValue || fwInspect.workspaceFolderValue || fwInspect.defaultValue;
 
   // Checks if initializing or user config changed for fileWatcher.enabled
-  if (!sanitizedUserConfig || !userConfig.get(`authToken`) || sanitizedUserConfig.fwEnabled !== fwVal) {
+  if (!sanitizedUserConfig || (await secrets.get(`authToken`)) || sanitizedUserConfig.fwEnabled !== fwVal) {
     fwEnabled = fwVal;
   }
 
@@ -322,10 +332,6 @@ const sanitizeUserConfig = () => {
     fwEnabled: fwVal,
     showPushSuccessNotification: userConfig.get(`showPushSuccessNotification`),
     showFileWatcherEnabledNotification: userConfig.get(`showFileWatcherEnabledNotification`),
-    authToken: userConfig
-      .get(`authToken`)
-      .replace(/^bearer/i, ``)
-      .trim(),
     hostname: userConfig.get(`hostname`),
     port: userConfig.get(`port`),
   };
@@ -355,7 +361,11 @@ const showToast = (message, toastType = `information`, opts = { forceShow: false
   if (!Object.keys(ToastTypes).includes(toastType)) {
     return;
   }
-  if ((!sanitizedUserConfig || !sanitizedUserConfig.showPushSuccessNotification) && !opts.forceShow && toastType !== `error`) {
+  if (
+    (!sanitizedUserConfig || !sanitizedUserConfig.showPushSuccessNotification) &&
+    !opts.forceShow &&
+    toastType !== `error`
+  ) {
     return;
   }
 
@@ -364,7 +374,7 @@ const showToast = (message, toastType = `information`, opts = { forceShow: false
 
 const isValidGameFile = (fileURI) => BB_GAME_CONFIG.validFileExtensions.some((ext) => fileURI.endsWith(ext));
 
-const isAuthTokenSet = () => Boolean(sanitizedUserConfig.authToken);
+const isAuthTokenSet = async () => Boolean(await secrets.get(`authToken`));
 const showAuthError = () => {
   showToast(
     `No Bitburner Auth Token is set. Please see the 'Authorization' section of the extensions README.md for more information.`,
